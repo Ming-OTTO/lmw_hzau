@@ -1,0 +1,103 @@
+pridict:
+
+'''
+python predict.py --config libox/root_get/segformer_cotton_root_1024x1024_150k.yml --image_path H:\\xh_libox\\warp\\0628 --model_path libox/root_get/xiangyimeng/best_model/model.pdparams --save_dir output/xym0628
+python predict.py --config libox/segformer_libox_root_1024x1024_150k.yml --image_path H:\\2024_6_xh_libox_1\\root_get\\test --model_path results/libox_xh_9/iter_6400/model.pdparams --save_dir H:\\2024_6_xh_libox_1\\root_get\\segout_xh_9_6400
+python predict.py --config libox/segformer_libox_root_1024x1024_150k.yml --image_path H:\\2024_6_xh_libox_1\\warp\\warped\\0708 --model_path results/libox_xh_13/best_model/model.pdparams --save_dir H:\\2024_6_xh_libox_1\\root_get\\segout_xh_13_best_part\\0708
+
+python predict.py --config configs/segformer/segformer_b5_cityscapes_1024x1024_160k.yml --image_path D:\edge\0825-suizi-origin\0825-suizi-origin --model_path D:\edge\0825-suizi-origin\best_model_grain_single\model.pdparams --save_dir D:\edge\0825-suizi-origin\0825
+
+"box_get"
+--config
+libox/box_get/hardnet_soil_small_1024x1024_160k.yml
+--image_path
+E:\Project\PaddleSeg\output\libox\XiaHui\batch2\box_miss
+--model_path
+libox/box_get/modelpad/model.pdparams
+--save_dir
+E:\Project\PaddleSeg\output\libox\XiaHui\batch2\box_mask_miss
+
+"root_get"
+--config
+libox/root_get/segformer_cotton_root_1024x1024_150k.yml
+--image_path
+I:\\2024_9_xh_libox_2\\warp\\TEST\\input
+--model_path
+libox/root_get/xiangyimeng/best_model/model.pdparams
+--save_dir
+I:\\2024_9_xh_libox_2\\warp\\TEST\\output
+'''
+
+visualdl --logdir results/
+
+
+量化训练：
+python tools/train.py --config configs/quick_start/pp_liteseg_optic_disc_512x512_1k.yml --do_eval --use_vdl --save_interval 250 --save_dir output_fp32
+python deploy/slim/quant/qat_train.py --config configs/quick_start/pp_liteseg_optic_disc_512x512_1k.yml --model_path output_fp32/best_model/model.pdparams --learning_rate 0.001 --do_eval --use_vdl --save_interval 250 --save_dir output_quant
+python deploy/slim/quant/qat_val.py --config configs/quick_start/pp_liteseg_optic_disc_512x512_1k.yml --model_path output_quant/best_model/model.pdparams
+python deploy/slim/quant/qat_export.py --config configs/quick_start/pp_liteseg_optic_disc_512x512_1k.yml --model_path output_quant/best_model/model.pdparams --save_dir output_quant_infer
+
+python deploy/slim/quant/qat_train.py --config libox/segformer_libox_root_1024x1024_150k.yml --model_path libox/root_get/xiangyimeng/best_model/model.pdparams --learning_rate 0.001 --do_eval --use_vdl --save_interval 250 --save_dir output_quant-root
+
+
+# act
+python run_seg.py \
+      --act_config_path='./configs/ppliteseg/ppliteseg_qat.yaml' \
+      --save_dir='./save_quant_model_qat'  \
+      --config_path="configs/datasets/pp_liteseg_1.0_data.yml"
+
+python test_seg.py \
+      --model_path=save_quant_model_qat \
+      --dataset='cityscapes' \
+      --config="configs/datasets/pp_liteseg_1.0_data.yml" \
+      --precision=int8 \
+      --use_trt=True
+
+
+# 量化后导出为静态图
+python deploy/slim/quant/qat_export.py --model_path=./output/output_quant-root/best_model/model.pdparams --save_dir=./output/save_quant_model_qat_infer --config="./libox/segformer_libox_root_1024x1024_150k.yml"  --for_fd --input_shape 1 3 2024 3400
+
+# 正常export
+python tools/export.py --config libox/segformer_libox_root_1024x1024_150k.yml --model_path libox/root_get/xiangyimeng/best_model/model.pdparams --save_dir output/inference_model_fd --input_shape 1 3 2024 3400 --for_fd
+
+
+----------------------------------------------------------------------------------------------------------------------------------------------
+# 大根盒根系分割 benchmark
+1.dataset:
+# 分割数据集
+## linux 换行
+python tools/data/split_dataset_list.py \
+  G:\bigbox_dataset\maize \ 
+  org \                  
+  label \                 
+  --split 0.7 0.2 0.1
+## windows 换行
+python tools\data\split_dataset_list.py ^
+G:\bigbox_dataset\zzx ^
+org ^
+label ^
+--split 0.7 0.2 0.1  
+
+
+2.train:
+"""
+--config
+libox/segformer_libox_root_1024x1024_150k.yml
+--iters
+191500
+--resume_model
+libox/root_get/xiangyimeng/iter_191000
+--save_interval
+100
+--save_dir
+results/libox_xh
+--use_vdl
+--do_eval
+"""
+3.可视化
+visualdl --logdir bigbox/output_fp32
+
+# 训练ppliteseg_stdc1
+python train.py --config bigbox\configs\pp_liteseg\pp_liteseg_stdc1_cityscapes_1024x512_scale0.5_160k.yml --save_dir bigbox/output_fp32 --do_eval --use_vdl --use_ema --iters 10000 --save_interval 1000 --precision fp32
+# 训练ppliteseg_stdc2
+python train.py --config bigbox\configs\pp_liteseg\pp_liteseg_stdc2_cityscapes_1024x512_scale0.5_160k.yml --save_dir bigbox/output_fp32/pp_liteseg_stdc2 --do_eval --use_vdl --use_ema --iters 10000 --save_interval 1000
